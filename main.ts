@@ -137,7 +137,9 @@ export default class MyPlugin extends Plugin {
             args = args.concat(['-l']);
         }
 
+        new Notice('Running reSnap');
         const { stderr, stdout } = await this.runProcess(reSnapPath, args);
+        new Notice('reSnap complete');
         return { drawingFilePath, drawingFileName };
     }
 
