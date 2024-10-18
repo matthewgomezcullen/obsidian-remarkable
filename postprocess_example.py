@@ -14,12 +14,14 @@ if __name__ == '__main__':
 
     # remove menu and indicators
     data = np.array(img)
-    menu_is_open = (data[52:58, 52:58] == 0).all()
+    menu_is_open = (data[40:81, 40:81] == 0).any()
     if menu_is_open:
         # remove the entire menu, and the x in the top right corner
+        print("Menu is open")
         data[:, :120, :] = 255
-        data[40:81, 1324:1364, :] = 255
+        data[0:120, 1324:1404, :] = 255
     else:
+        print("Menu is closed")
         # remove only the menu indicator circle
         data[40:81, 40:81, :] = 255
 

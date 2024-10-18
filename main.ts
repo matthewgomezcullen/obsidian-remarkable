@@ -1,9 +1,9 @@
-const spawn = require('child_process').spawn;
 const path = require('path');
 
 //import * as moment from 'moment';
 import { App, Modal, Notice, Plugin, PluginSettingTab, Editor,
          Setting, MarkdownView, MarkdownSourceView, FileSystemAdapter } from 'obsidian';
+import { exec } from 'child_process';
 
 import * as obsidian from 'obsidian';
 
@@ -15,6 +15,7 @@ interface MyPluginSettings {
     outputPath: string;
     rmAddress: string;
     postprocessor: string;
+    envPath: string;
 }
 
 const DEFAULT_SETTINGS: MyPluginSettings = {
@@ -22,7 +23,8 @@ const DEFAULT_SETTINGS: MyPluginSettings = {
     invertRemarkableImages: true,
     outputPath: '.',
     rmAddress: '10.11.99.1',
-    postprocessor: ''
+    postprocessor: '',
+    envPath: process.env.PATH
 }
 
 function mkCheckCallback(innerFn: () => any): (checking: boolean) => boolean {
@@ -87,34 +89,26 @@ export default class MyPlugin extends Plugin {
         await this.saveData(this.settings);
     }
 
-    async runProcess(executable_path: string, args: string[]): Promise<Record<'stderr' | 'stdout', string>> {
-        let outputs: Record<'stderr' | 'stdout', string> = {
-            'stderr': '',
-            'stdout': ''
-        };
+    async runProcess(executable_path: string, args: string[], envPath: string): Promise<Record<'stderr' | 'stdout', string>> {
         return new Promise(function (resolve, reject) {
-            const process = spawn(executable_path, args);
-            process.stdout.on('data', (data: string) => { outputs.stdout += data; });
-            process.stderr.on('data', (data: string) => { outputs.stderr += data; });
-
-            process.on('close', async function (code: number) {
-                if(code === 0) {
-                    resolve(outputs);
+            exec(`${executable_path} ${args.join(' ')}`, {
+                env: {
+                    ...process.env, 
+                    PATH: envPath, // Adjust as needed
+                    DISPLAY: ':0'
                 }
-                else {
-                    reject("Nonzero exitcode.\nSTDERR: " + outputs.stderr
-                        + "\nSTDOUT: " + outputs.stdout);
+            }, (error, stdout, stderr) => {
+                if (error) {
+                    reject(`Error: ${error.message}\nSTDERR: ${stderr}\nSTDOUT: ${stdout}`);
+                } else {
+                    resolve({ stdout, stderr });
                 }
-            });
-            process.on('error', function (err: string) {
-                reject(err);
             });
         });
     }
 
     async callReSnap(landscape: boolean) {
-        const { reSnapPath, rmAddress } = this.settings;
-        const { spawn } = require('child_process');
+        const { reSnapPath, rmAddress, envPath } = this.settings;
 
         let vaultAbsPath;
         const adapter = this.app.vault.adapter;
@@ -129,25 +123,25 @@ export default class MyPlugin extends Plugin {
 
         const now = moment();
         const drawingFileName = `rM drawing ${now.format("YYYY-MM-DD-HH.mm.ss")}.png`;
-        const absOutputFolderPath = adapter.getFullRealPath(this.settings.outputPath);
-        const drawingFilePath = path.join(absOutputFolderPath, drawingFileName);
+        const absOutputFolderPath = adapter.getFullPath(this.settings.outputPath);
+        const drawingFilePath = "'" + path.join(absOutputFolderPath, drawingFileName) + "'";
 
-        let args = ['-o', drawingFilePath, '-s', rmAddress];
+        let args = ['-o', drawingFilePath, '-s', rmAddress, '-n'];
         if(landscape) {
             args = args.concat(['-l']);
         }
 
         new Notice('Running reSnap');
-        const { stderr, stdout } = await this.runProcess(reSnapPath, args);
+        const { stderr, stdout } = await this.runProcess(reSnapPath, args, envPath);
         new Notice('reSnap complete');
         return { drawingFilePath, drawingFileName };
     }
 
     async postprocessDrawing(drawingFilePath: string) {
-        const { postprocessor } = this.settings;
+        const { postprocessor, envPath } = this.settings;
         if (postprocessor) {
             const args = [drawingFilePath];
-            const { stderr, stdout } = await this.runProcess(postprocessor, args);
+            const { stderr, stdout } = await this.runProcess(postprocessor, args, envPath);
         }
         return true;
     }
@@ -167,6 +161,7 @@ export default class MyPlugin extends Plugin {
             new Notice('Inserted your rM drawing!');
             return true;
         } catch(error) {
+            new Notice('Failed.' + error);
             new Notice('Could not insert your rM drawing! Is your tablet connected ' +
                        'and reachable at the configured address?');
             throw error;
@@ -311,5 +306,16 @@ class SampleSettingTab extends PluginSettingTab {
                 this.plugin.settings.postprocessor = value;
                 await this.plugin.saveSettings();
             }));
+        
+        new Setting(containerEl)
+            .setName('Environment path')
+            .setDesc('Copy and paste the user\'s path here. Otherwise, third-party libraries will not be recognised')
+            .addText(text => text
+                .setValue(this.plugin.settings.envPath)
+                .onChange(async (value) => {
+                    this.plugin.settings.envPath = value;
+                    await this.plugin.saveSettings();
+                })
+            )
     }
 }
